@@ -1,8 +1,8 @@
 #include "common.h"
 
-const char* VERSION = "0.0.1";
+const char* VERSION = "0.0.2";
 
-
+#include "JoD.h"  // Joke of the Day library (german jokes)
 
 #include "Adafruit_Thermal.h"
 #include "SoftwareSerial.h"
@@ -37,24 +37,6 @@ const char* getRstReason(esp_reset_reason_t r) {
   }
   return "INVALID";
 }
-// void loop_handle_WIFI() {
-//   // re-connect to wifi
-//   if ((WiFi.status() != WL_CONNECTED) && ((millis() - wifi_reconnect_timer) > WIFI_CHECK)) {
-//     wifi_reconnect_timer = millis();
-//     isWifiAvailable = false;
-//     DEBUG_PRINTLN("Reconnecting to WiFi...");
-//     WiFi.disconnect();
-//     WiFi.reconnect();
-//   }
-//   if (!isWifiAvailable && (WiFi.status() == WL_CONNECTED)) {
-//     // connection was lost and now got reconnected ...
-//     isWifiAvailable = true;
-//     wifi_reconnect_counter++;
-//     show_WIFI(wifi_reconnect_counter, getWifiIpAddr());
-//   }
-//   if (!isMqttAvailable && isWifiAvailable)
-//     isMqttAvailable = mqttConnect();
-// }
 
 
 
@@ -80,6 +62,8 @@ void setup() {
   MQTTDEVICEID += String(mac_addr[4], HEX);
   MQTTDEVICEID += String(mac_addr[5], HEX);
   setupMqttTopic(MQTTDEVICEID);
+  DEBUG_PRINT("MQTTDEVICEID: ");
+  DEBUG_PRINTLN(MQTTDEVICEID);
 
 //  buttonInit();
   tft.init(); // vs begin??
@@ -99,11 +83,13 @@ void setup() {
   tft.setCursor(20, 40);
   tft.println("Setup Started");
 
-  isWifiAvailable = setupWifi(&tft) ? false : true;
+  isWifiAvailable = setupWifi(&tft);
 
   if (isWifiAvailable) {
-    DEBUG_PRINTLN("Init Webserver");
+    DEBUG_PRINTLN("Init OTA Webserver");
+    tft.println("Init OTA Webserver");
     initAsyncWebserver();
+    delay(2000);
   }
   //else show offline msg, halt or reboot?!
 
@@ -127,21 +113,18 @@ void setup() {
   //printer.println("");
   printer.justify('C');
   printer.boldOn();
-  printer.println(F("HALLO!"));
+  printer.println(F("Witz des Tages"));
   printer.boldOff();
 
-  printer.setCharset(CHARSET_GERMANY);
-  printer.setCodePage(CODEPAGE_CP850);
-
+  //printer.setCharset(CHARSET_GERMANY);
+  //printer.writeBytes(27, 't', CODEPAGE_ISO_8859_1);
+  printer.setCodePage(CODEPAGE_ISO_8859_1);
+  printer.justify('L');
 
   printer.println(F("Der erste Tag für die neue Sekretärin. Das Telefon klingelt mehrmals, aber sie geht nicht an den Apparat. \"Frau Meyer-Schmidthuber, wollen Sie nicht vielleicht mal ans Telefon gehen?\" fragt der Chef argwöhnisch. \"Och nee, wissense, ich hab niemand von meinen neuen Job erzählt, also muss es für Sie sein!\""));
 
   //printer.justify('R');
   //printer.println(F("Right justified"));
-
-  //printer.justify('L');
-  //printer.println(F("Left justified"));
-  //printer.println("ENDE");
 
 
   printer.feed(2);
@@ -152,14 +135,19 @@ void setup() {
 }
 
 void loop() {
+
+  checkWifi(isWifiAvailable, isMqttAvailable);
+
+  if (isMqttAvailable) mqttPublish(MQTT_TOPIC_MSG, "msg: in the loop");
+
   DEBUG_PRINTF("rotation: %d\n", tft.getRotation());
-  tft.setRotation(tft.getRotation()+1 % 3);
+  tft.setRotation(tft.getRotation() + 1 % 3);
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_BLUE);
   tft.setTextFont(4);
   tft.setCursor(20, 40);
   tft.println("LOOP Started");
-
+  tft.println(getWifiIpAddr());
 
   delay(5000);
 }

@@ -9,22 +9,26 @@
 #include "wifi_mqtt_creds.h"
 
 WiFiClientSecure wifiClient;
-PubSubClient mqttClient;
+PubSubClient mqttClient(wifiClient);
 AsyncWebServer httpServer(80);
 
 String ipAddr;
 String dnsAddr;
 const unsigned maxWifiWaitSeconds = 60;
+unsigned long wifi_reconnect_timer   = 0;
+unsigned long wifi_reconnect_counter = 0;
 
+#define EVERY_SECOND 1000
+#define WIFI_CHECK   60 * EVERY_SECOND
 
+// must match topics_t order
 String mqtt_topics[] {
   "home/" MQTT_DEV_TYPE "/%MQTTDEVICEID%/setconfig",
   "home/" MQTT_DEV_TYPE "/%MQTTDEVICEID%/state",
   "home/" MQTT_DEV_TYPE "/%MQTTDEVICEID%/version",
   "home/" MQTT_DEV_TYPE "/%MQTTDEVICEID%/ipaddr",
   "home/" MQTT_DEV_TYPE "/%MQTTDEVICEID%/rst",
-  "home/" MQTT_DEV_TYPE "/%MQTTDEVICEID%/speed",
-  "home/" MQTT_DEV_TYPE "/%MQTTDEVICEID%/incline",
+  "home/" MQTT_DEV_TYPE "/%MQTTDEVICEID%/msg"
 };
 
 
@@ -40,12 +44,33 @@ const char* getTopic(topics_t topic) {
 }
 
 
-String getWifiIpAddr() {
+const String getWifiIpAddr() {
   return ipAddr;
 }
 
+
+void checkWifi(bool &wifiAvail, bool &mqttAvail) {
+  // re-connect to wifi
+  if ((WiFi.status() != WL_CONNECTED) && ((millis() - wifi_reconnect_timer) > WIFI_CHECK)) {
+    wifi_reconnect_timer = millis();
+    wifiAvail = false;
+    DEBUG_PRINTLN("Reconnecting to WiFi...");
+    WiFi.disconnect();
+    WiFi.reconnect();
+  }
+  if (! wifiAvail && (WiFi.status() == WL_CONNECTED)) {
+    // connection was lost and now got reconnected ...
+    wifiAvail = true;
+    wifi_reconnect_counter++;
+    //show_WIFI(wifi_reconnect_counter, getWifiIpAddr());
+  }
+  if (! mqttAvail && wifiAvail)
+    mqttAvail = mqttConnect(&tft);
+}
+
+
 // note: delays mainly to keep tft text shortly readable
-int setupWifi(TFT_eSPI* tft /*= NULL*/) {
+bool setupWifi(TFT_eSPI* tft /*= NULL*/) {
   DEBUG_PRINTLN();
   DEBUG_PRINTLN("Connecting to wifi");
 
@@ -74,7 +99,7 @@ int setupWifi(TFT_eSPI* tft /*= NULL*/) {
 	  tft->println("Wifi TIMEOUT");
       }
       delay(2000);
-      return 1;
+      return false;
     }
   }
   ipAddr  = WiFi.localIP().toString();
@@ -95,13 +120,14 @@ int setupWifi(TFT_eSPI* tft /*= NULL*/) {
       tft->print("IP Addr: "); tft->println(ipAddr);
   }
   delay(2000);
-  return 0;
+  return true;
 }
 
 
 bool mqttConnect(TFT_eSPI* tft /*= NULL*/) {
   bool rc;
-  DEBUG_PRINT("Attempting MQTT connection...");
+  DEBUG_PRINTLN("Attempting MQTT connection...");
+  DEBUG_PRINT("HOST: "); DEBUG_PRINTLN(mqtt_host);
   if (tft != NULL) {
     tft->fillScreen(TFT_BLACK);
     tft->setTextColor(TFT_WHITE);
@@ -109,14 +135,16 @@ bool mqttConnect(TFT_eSPI* tft /*= NULL*/) {
     tft->setCursor(20, 40);
     tft->print("Connecting to MQTT server: ");
     tft->println(mqtt_host);
+    delay(1000);
   }
   // Attempt to connect
 #ifdef MQTT_USE_SSL
+  DEBUG_PRINTLN("set SSL cert & key");
   wifiClient.setCACert(server_crt_str);
   wifiClient.setCertificate(client_crt_str);
   wifiClient.setPrivateKey(client_key_str);
 #endif
-
+  DEBUG_PRINTLN("setServer ...");
   mqttClient.setServer(mqtt_host, mqtt_port);
   if (mqttClient.connect(MQTTDEVICEID.c_str(), mqtt_user, mqtt_pass,
 		     getTopic(MQTT_TOPIC_STATE), 1, 1, "OFFLINE")) {
@@ -159,8 +187,13 @@ bool mqttConnect(TFT_eSPI* tft /*= NULL*/) {
   return false;
 }
 
+bool mqttPublish(topics_t t, const char* msg)
+{
+  return mqttClient.publish(getTopic(t), msg);
+}
 
 void initAsyncWebserver()
 {
   AsyncElegantOTA.begin(&httpServer);
+  httpServer.begin();
 }
